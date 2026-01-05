@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wyckoff Master Chart</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+    <style>
+        body { 
+            margin: 0; 
+            padding: 20px; 
+            font-family: "PingFang SC", "Microsoft YaHei", "SimHei", "Heiti SC", sans-serif;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 100%;
+            height: 92vh;
+            margin: 0 auto;
+            background: #fff;
+            border-radius: 4px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 10px 15px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;  /* 防止内容溢出 */
+        }
+        #main { 
+            flex: 1;
+            width: 100%; 
+        }
+        .loading { 
+            position: absolute; 
+            top: 50%; left: 50%; 
+            transform: translate(-50%, -50%); 
+            font-size: 20px; color: #666; 
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="main"></div>
+    </div>
+    <div id="loading" class="loading">正在绘制大师级威科夫图表...</div>
+
+    <script>
+        // --- 1. MA 计算函数 ---
+        function calculateMA(data, dayCount) {
+            var result = [];
+            for (var i = 0, len = data.length; i < len; i++) {
+                if (i < dayCount) {
+                    result.push('-');
+                    continue;
+                }
+                var sum = 0;
+                for (var j = 0; j < dayCount; j++) {
+                    // data[i][1] is close price
+                    sum += parseFloat(data[i - j][1]);
+                }
+                result.push((sum / dayCount).toFixed(2));
+            }
+            return result;
+        }
+
+        // --- 2. 文本换行工具 ---
+        function wrapText(text, maxLength) {
+            if (!text) return '';
+            const result = [];
+            for (let i = 0; i < text.length; i += maxLength) {
+                result.push(text.slice(i, i + maxLength));
+            }
+            return result.join('\n');
+        }
+
+        // --- 3. 主逻辑 ---
+        async function initChart() {
+            try {
+                // 加载数据
+                const [klineRes, analysisRes] = await Promise.all([
+                    fetch('kline.csv').then(r => r.text()),
+                    fetch('analysis.json').then(r => r.json())
+                ]);
+
+                // 解析 CSV
+                const parsedData = Papa.parse(klineRes, { header: true, skipEmptyLines: true });
+                // 排序
+                parsedData.data.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+                const rawData = parsedData.data;
+                const dates = rawData.map(d => d.date);
+                const kValues = rawData.map(d => [
+                    parseFloat(d.open),
+                    parseFloat(d.close),
+                    parseFloat(d.low),
+                    parseFloat(d.high)
+                ]);
+                // 收盘价数组用于 MA
+                const closePrices = rawData.map(d => [d.date, parseFloat(d.close)]);
+
+                // 计算 MA
+                const ma50 = calculateMA(closePrices, 50);
+                const ma200 = calculateMA(closePrices, 200);
+
+                const analysis = analysisRes;
+
+                // --- 4. 构建 ECharts 数据 ---
+
+                // A. 区域 (Zones) - 吸筹/派发
+                // 逻辑: 吸筹(淡绿), 派发(淡红)
+                const zoneMarkAreas = analysis.zones.map(zone => {
+                    const isAccum = zone.type === 'accumulation';
+                    return [
+                        {
+                            xAxis: zone.start,
+                            yAxis: zone.top,
+                            itemStyle: {
+                                color: isAccum ? 'rgba(0, 255, 0, 0.08)' : 'rgba(255, 0, 0, 0.08)'
+                            },
+                            label: {
+                                show: true,
+                                position: 'insideTopLeft',
+                                formatter: zone.label,
+                                color: isAccum ? '#2e7d32' : '#c62828',
+                                fontSize: 14,
+                                fontWeight: 'bold'
+                            }
+                        },
+                        {
+                            xAxis: zone.end,
+                            yAxis: zone.bottom
+                        }
+                    ];
+                });
+
+                // B. 阶段 (Phases) - 竖虚线（标签通过 graphic 组件在上方固定区域渲染）
+                const phaseMarkLines = analysis.phases.map(phase => ({
+                    xAxis: phase.start,
+                    label: { show: false },
+                    lineStyle: {
+                        type: 'dashed',
+                        color: '#666',
+                        width: 1.5
+                    }
+                }));
+
+                // Phase 区域（仅用于背景，不显示标签）
+                const phaseMarkAreas = analysis.phases.map((phase, idx) => {
+                    const nextStart = analysis.phases[idx + 1] ? analysis.phases[idx + 1].start : dates[dates.length - 1];
+                    return [
+                        {
+                            xAxis: phase.start,
+                            itemStyle: { color: 'transparent' }
+                        },
+                        {
+                            xAxis: nextStart
+                        }
+                    ];
+                });
+                
+                // Phase 标签数据（用于 graphic 组件，在图表渲染后计算像素位置）
+                const phaseLabelsData = analysis.phases.map((phase, idx) => {
+                    const startIdx = dates.indexOf(phase.start);
+                    const nextStart = analysis.phases[idx + 1] ? analysis.phases[idx + 1].start : dates[dates.length - 1];
+                    const endIdx = dates.indexOf(nextStart);
+                    const midIdx = Math.floor((startIdx + endIdx) / 2); // 区间中点
+                    return {
+                        name: phase.name,
+                        dateIdx: midIdx,
+                        date: dates[midIdx] || phase.start
+                    };
+                });
+
+
+                // C. 关键事件 (Events) - 智能标注（防重叠算法）
+                // 按日期排序事件，计算智能布局
+                const sortedEvents = [...analysis.events].sort((a, b) => 
+                    new Date(a.date) - new Date(b.date)
+                );
+                
+                // 计算价格范围，用于判断标注应该显示在上方还是下方
+                const allPrices = rawData.map(d => parseFloat(d.close));
+                const priceMin = Math.min(...allPrices);
+                const priceMax = Math.max(...allPrices);
+                const priceMid = (priceMin + priceMax) / 2;
+                
+                // 计算事件间的日期距离，智能分配高度层级
+                // 分别维护上方和下方的层级
+                const eventPositions = [];
+                const topSlots = [];    // 上方标注的层级占用
+                const bottomSlots = []; // 下方标注的层级占用
+                
+                sortedEvents.forEach((evt, i) => {
+                    const evtDateIdx = dates.indexOf(evt.date);
+                    // 根据价格位置决定标注方向：高价显示在下方，低价显示在上方
+                    const showBelow = evt.price > priceMid;
+                    const slots = showBelow ? bottomSlots : topSlots;
+                    
+                    let assignedLevel = 0;
+                    // 找到一个不冲突的层级
+                    for (let level = 0; level < 4; level++) {
+                        const lastUsedIdx = slots[level] || -100;
+                        // 如果距离上次使用超过12个交易日，可以复用这个层级
+                        if (evtDateIdx - lastUsedIdx > 12) {
+                            assignedLevel = level;
+                            slots[level] = evtDateIdx;
+                            break;
+                        }
+                        assignedLevel = level + 1;
+                    }
+                    eventPositions.push({ level: assignedLevel, showBelow });
+                });
+
+                const eventMarkPoints = sortedEvents.map((evt, i) => {
+                    const isBullish = ['SC', 'Spring', 'LPS', 'SOS', 'JAC'].includes(evt.type);
+                    const color = isBullish ? '#D90429' : '#2b2d42';
+                    
+                    const { level, showBelow } = eventPositions[i];
+                    const distance = 25 + (level * 50);
+
+                    // 移除 label 中的 "[Type]: " 前缀
+                    let cleanLabel = evt.label;
+                    if (cleanLabel.startsWith(evt.type)) {
+                        cleanLabel = cleanLabel.substring(evt.type.length).replace(/^[:：\s]+/, '');
+                    }
+                    const wrappedReason = wrapText(cleanLabel, 10);
+
+                    return {
+                        name: evt.type,
+                        coord: [evt.date, evt.price],
+                        value: evt.type,
+                        symbol: 'pin',
+                        symbolSize: 25,
+                        symbolRotate: showBelow ? 180 : 0,
+                        symbolOffset: [0, showBelow ? 12 : -12],
+                        itemStyle: { color: color },
+                        label: {
+                            show: true,
+                            position: showBelow ? 'bottom' : 'top',
+                            distance: distance,
+                            formatter: `{term|${evt.type}}\n{reason|${wrappedReason}}`,
+                            backgroundColor: 'rgba(255,255,255,0.95)',
+                            borderColor: color,
+                            borderWidth: 1,
+                            borderRadius: 4,
+                            padding: [5, 8],
+                            align: 'center',
+                            rich: {
+                                term: {
+                                    fontSize: 13,
+                                    fontWeight: 'bold',
+                                    color: color,
+                                    align: 'center',
+                                    padding: [0, 0, 2, 0]
+                                },
+                                reason: {
+                                    fontSize: 10,
+                                    color: '#555',
+                                    align: 'center',
+                                    lineHeight: 13
+                                }
+                            }
+                        }
+                    };
+                });
+
+                // --- 5. ECharts Option ---
+                const option = {
+                    // 标题: 左上角
+                    title: {
+                        text: `${analysis.stock.name} (${analysis.stock.code}) 威科夫结构图谱`,
+                        subtext: analysis.quote || "Wyckoff Market Structure",
+                        left: '3%',
+                        top: '0.5%',
+                        textStyle: { fontSize: 20, fontWeight: 'bold' },
+                        subtextStyle: { fontSize: 12, fontStyle: 'italic', color: '#666' }
+                    },
+                    tooltip: {
+                        trigger: 'axis',
+                        axisPointer: { type: 'cross' },
+                        borderWidth: 1,
+                        borderColor: '#ccc',
+                        padding: 10,
+                        textStyle: { color: '#000' }
+                    },
+                    legend: {
+                        data: ['收盘价', 'MA50', 'MA200'],
+                        top: '1%',
+                        right: '3%',
+                        orient: 'vertical',
+                        backgroundColor: 'rgba(255,255,255,0.8)',
+                        borderRadius: 4,
+                        padding: 6,
+                        textStyle: { fontSize: 11 }
+                    },
+                    grid: {
+                        left: '5%',
+                        right: '8%',
+                        bottom: '12%',
+                        top: '15%',   // 图表区域顶部（Phase标签在 8%-14% 区域）
+                        containLabel: true
+                    },
+                    xAxis: {
+                        type: 'category',
+                        data: dates,
+                        scale: true,
+                        boundaryGap: false,
+                        axisLine: { onZero: false, lineStyle: { color: '#666' } },
+                        splitLine: { show: false },
+                        min: 'dataMin'
+                    },
+                    yAxis: {
+                        scale: true,
+                        splitLine: { lineStyle: { color: '#eee' } }
+                    },
+                    dataZoom: [
+                        { type: 'inside', start: 50, end: 100 },
+                        { 
+                            type: 'slider', 
+                            show: true, 
+                            bottom: '3%',
+                            height: 25,
+                            borderColor: '#ddd',
+                            fillerColor: 'rgba(47, 69, 84, 0.15)',
+                            handleStyle: { color: '#2f4554' }
+                        }
+                    ],
+                    series: [
+                        {
+                            name: '收盘价',
+                            type: 'line', // 用线图表示收盘价，符合用户"收盘价线（黑色）"的要求
+                            data: rawData.map(d => d.close),
+                            symbol: 'none',
+                            lineStyle: { color: '#000000', width: 1.5 },
+                            markLine: {
+                                symbol: ['none', 'none'],
+                                data: phaseMarkLines,
+                                animation: false
+                            },
+                            markArea: {
+                                data: [...zoneMarkAreas, ...phaseMarkAreas]
+                            },
+                            markPoint: {
+                                data: eventMarkPoints
+                            }
+                        },
+                        {
+                            name: 'MA50',
+                            type: 'line',
+                            data: ma50,
+                            smooth: true,
+                            symbol: 'none',
+                            lineStyle: { color: '#2196f3', width: 1.5, type: 'dashed' } // 蓝虚线
+                        },
+                        {
+                            name: 'MA200',
+                            type: 'line',
+                            data: ma200,
+                            smooth: true,
+                            symbol: 'none',
+                            lineStyle: { color: '#f44336', width: 1.5, type: 'dashed' } // 红虚线
+                        }
+                    ]
+                };
+
+                const chart = echarts.init(document.getElementById('main'));
+                chart.setOption(option);
+                
+                // --- 6. 渲染 Phase 标签（在图表上方固定区域，竖排显示）---
+                function renderPhaseLabels() {
+                    // 获取 grid 区域边界
+                    const gridRect = chart.getModel().getComponent('grid').coordinateSystem.getRect();
+                    const gridLeft = gridRect.x;
+                    const gridRight = gridRect.x + gridRect.width;
+                    
+                    const graphicElements = phaseLabelsData.map((item, idx) => {
+                        // 将日期转换为像素坐标
+                        const xPixel = chart.convertToPixel({ xAxisIndex: 0 }, item.date);
+                        
+                        // 检查是否在可视范围内
+                        const isVisible = xPixel >= gridLeft - 20 && xPixel <= gridRight + 20;
+                        
+                        // 提取简短名称用于显示
+                        let shortName = item.name;
+                        if (item.name.length > 15) {
+                            const match = item.name.match(/Phase\s*([A-E])/i);
+                            shortName = match ? `Phase ${match[1]}` : item.name.substring(0, 12);
+                        }
+                        
+                        return {
+                            type: 'text',
+                            left: xPixel,
+                            top: '7%',  // 固定在标题下方、图表上方的区域
+                            invisible: !isVisible,
+                            style: {
+                                text: shortName,
+                                fill: '#C41E3A',
+                                fontSize: 11,
+                                fontWeight: 'bold',
+                                fontFamily: 'Arial, sans-serif',
+                                textAlign: 'center',
+                                textVerticalAlign: 'middle',
+                                // 竖排显示（逆时针旋转90度）
+                                textRotation: -Math.PI / 2
+                            },
+                            z: 100
+                        };
+                    });
+                    
+                    chart.setOption({ graphic: graphicElements });
+                }
+                
+                // 初次渲染和 dataZoom 变化时更新标签位置
+                renderPhaseLabels();
+                chart.on('dataZoom', renderPhaseLabels);
+                
+                document.getElementById('loading').style.display = 'none';
+                
+                // 窗口大小变化时重新渲染
+                window.addEventListener('resize', () => {
+                    chart.resize();
+                    setTimeout(renderPhaseLabels, 100);
+                });
+
+            } catch (e) {
+                document.getElementById('loading').innerHTML = '绘图失败: ' + e.message;
+                console.error(e);
+            }
+        }
+
+        initChart();
+    </script>
+</body>
+</html>
