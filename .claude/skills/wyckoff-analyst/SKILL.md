@@ -160,7 +160,8 @@ cp .claude/skills/wyckoff-analyst/assets/chart_template.html workspace/sh_601138
 ### Step 6: 预览图表
 
 ```bash
-# 使用 Python 简易服务器
+# 先杀掉可能占用 8000 端口的旧 server，再启动新的
+lsof -i :8000 -t | xargs kill 2>/dev/null; sleep 0.5
 cd workspace/sh_601138_xxx && python -m http.server 8000
 # 浏览器打开 http://localhost:8000/chart.html
 ```

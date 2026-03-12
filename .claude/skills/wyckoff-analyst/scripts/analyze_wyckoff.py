@@ -146,9 +146,18 @@ CSV 数据列说明：date(日期), code(代码), open(开盘), high(最高), lo
         print(f"网络错误: {e.reason}", file=sys.stderr)
         sys.exit(1)
 
-    content = result["choices"][0]["message"]["content"]
+    choice = result.get("choices", [{}])[0]
+    content = choice.get("message", {}).get("content")
     usage = result.get("usage", {})
     print(f"  tokens: {usage.get('prompt_tokens', '?')} in / {usage.get('completion_tokens', '?')} out", file=sys.stderr)
+
+    if not content:
+        finish = choice.get("finish_reason", "unknown")
+        error = result.get("error", {})
+        print(f"API 返回空内容 (finish_reason={finish})", file=sys.stderr)
+        if error:
+            print(f"  error: {error}", file=sys.stderr)
+        sys.exit(1)
 
     # 清理可能的 markdown 代码块标记
     content = content.strip()

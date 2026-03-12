@@ -738,9 +738,10 @@
         // --- Main chart logic ---
         async function initChart() {
             try {
+                const cacheBust = `?t=${Date.now()}`;
                 const [klineRes, analysisRes] = await Promise.all([
-                    fetch('kline.csv').then(r => r.text()),
-                    fetch('analysis.json').then(r => r.json())
+                    fetch(`kline.csv${cacheBust}`).then(r => r.text()),
+                    fetch(`analysis.json${cacheBust}`).then(r => r.json())
                 ]);
 
                 const parsedData = Papa.parse(klineRes, { header: true, skipEmptyLines: true });
