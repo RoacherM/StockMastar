@@ -3,66 +3,608 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wyckoff Master Chart</title>
+    <title>Wyckoff Structure Analysis</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
     <style>
-        body { 
-            margin: 0; 
-            padding: 20px; 
-            font-family: "PingFang SC", "Microsoft YaHei", "SimHei", "Heiti SC", sans-serif;
-            background-color: #f5f5f5;
+        :root {
+            /* TradingView Light palette */
+            --bg-base: #ffffff;
+            --bg-surface: #f8f9fd;
+            --bg-elevated: #f0f3fa;
+            --bg-hover: #e8ecf3;
+            --border-subtle: #e0e3eb;
+            --border-default: #d1d4dc;
+            --border-accent: #b2b5be;
+            --text-primary: #131722;
+            --text-secondary: #787b86;
+            --text-muted: #b2b5be;
+            --accent-red: #ef5350;
+            --accent-red-dim: rgba(239, 83, 80, 0.1);
+            --accent-green: #26a69a;
+            --accent-green-dim: rgba(38, 166, 154, 0.1);
+            --accent-blue: #2962ff;
+            --accent-blue-dim: rgba(41, 98, 255, 0.08);
+            --accent-amber: #ff9800;
+            --accent-amber-dim: rgba(255, 152, 0, 0.08);
+            --shadow-diffuse: 0 4px 12px rgba(0, 0, 0, 0.08);
+            --radius-lg: 16px;
+            --radius-md: 10px;
+            --radius-sm: 6px;
+            --font-display: 'Outfit', system-ui, -apple-system, sans-serif;
+            --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+            --font-body: 'Outfit', "PingFang SC", "Microsoft YaHei", sans-serif;
+            --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
         }
-        .container {
-            max-width: 100%;
-            height: 92vh;
+
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--font-body);
+            background: var(--bg-base);
+            color: var(--text-primary);
+            height: 100dvh;
+            overflow: hidden;
+        }
+
+        .grain { display: none; }
+
+        /* --- Layout --- */
+        .layout {
+            display: grid;
+            grid-template-columns: 1fr 300px;
+            grid-template-rows: auto 1fr;
+            gap: 0;
+            height: 100dvh;
+            max-height: 100dvh;
+            max-width: 1920px;
             margin: 0 auto;
-            background: #fff;
-            border-radius: 4px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            padding: 10px 15px;
+            overflow: hidden;
+        }
+
+        /* --- Header --- */
+        .header {
+            grid-column: 1 / -1;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 28px 10px;
+            border-bottom: 1px solid var(--border-subtle);
+            opacity: 0;
+            transform: translateY(-12px);
+            animation: fadeSlideDown 0.6s var(--ease-out-expo) 0.1s forwards;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: baseline;
+            gap: 16px;
+        }
+
+        .stock-name {
+            font-family: var(--font-display);
+            font-size: 26px;
+            font-weight: 600;
+            letter-spacing: -0.03em;
+            color: var(--text-primary);
+        }
+
+        .stock-code {
+            font-family: var(--font-mono);
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-muted);
+            letter-spacing: 0.02em;
+        }
+
+        .header-quote {
+            font-size: 13px;
+            font-style: italic;
+            color: var(--text-muted);
+            max-width: 360px;
+            text-align: right;
+            line-height: 1.5;
+        }
+
+        .phase-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-family: var(--font-mono);
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+
+        .phase-badge--bear {
+            background: var(--accent-red-dim);
+            color: var(--accent-red);
+            border: 1px solid rgba(239, 83, 80, 0.3);
+        }
+
+        .phase-badge--bull {
+            background: var(--accent-green-dim);
+            color: var(--accent-green);
+            border: 1px solid rgba(38, 166, 154, 0.3);
+        }
+
+        .phase-badge__dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        .phase-badge--bear .phase-badge__dot { background: var(--accent-red); }
+        .phase-badge--bull .phase-badge__dot { background: var(--accent-green); }
+
+        /* --- Main chart area --- */
+        .main-area {
             display: flex;
             flex-direction: column;
-            overflow: hidden;  /* 防止内容溢出 */
+            min-height: 0;
+            overflow: hidden;
+            border-right: 1px solid var(--border-subtle);
         }
-        #main { 
+
+        .chart-wrapper {
             flex: 1;
-            width: 100%; 
+            min-height: 0;
+            overflow: hidden;
+            padding: 8px 12px 0 8px;
+            opacity: 0;
+            animation: fadeIn 0.8s var(--ease-out-expo) 0.3s forwards;
         }
-        .loading { 
-            position: absolute; 
-            top: 50%; left: 50%; 
-            transform: translate(-50%, -50%); 
-            font-size: 20px; color: #666; 
+
+        #main {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* --- Chart cursor --- */
+        .chart-wrapper { cursor: crosshair; }
+        .chart-wrapper.is-dragging { cursor: grabbing; }
+
+        /* --- Event list (sidebar) --- */
+        .event-list {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+        }
+
+        .event-row {
+            display: grid;
+            grid-template-columns: 42px 56px 1fr;
+            gap: 8px;
+            align-items: start;
+            padding: 8px 10px;
+            border-radius: var(--radius-sm);
+            transition: background 0.25s ease;
+        }
+
+        .event-row:hover { background: var(--bg-hover); }
+
+        .event-row__type {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            font-weight: 600;
+            padding: 2px 5px;
+            border-radius: 3px;
+            text-align: center;
+            line-height: 1.4;
+        }
+
+        .event-row--bear .event-row__type {
+            background: rgba(120, 123, 134, 0.1);
+            color: #787b86;
+        }
+
+        .event-row--bull .event-row__type {
+            background: var(--accent-red-dim);
+            color: var(--accent-red);
+        }
+
+        .event-row__price {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            padding-top: 1px;
+        }
+
+        .event-row__label {
+            font-size: 11px;
+            color: var(--text-muted);
+            line-height: 1.45;
+            overflow: hidden;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+        }
+
+        .event-row:hover .event-row__label {
+            color: var(--text-secondary);
+            -webkit-line-clamp: unset;
+        }
+
+        /* --- Sidebar --- */
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            min-height: 0;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: var(--bg-hover) transparent;
+        }
+
+        .sidebar::-webkit-scrollbar { width: 4px; }
+        .sidebar::-webkit-scrollbar-track { background: transparent; }
+        .sidebar::-webkit-scrollbar-thumb { background: var(--bg-hover); border-radius: 4px; }
+
+        .panel {
+            padding: 20px 22px;
+            border-bottom: 1px solid var(--border-subtle);
+            opacity: 0;
+            transform: translateX(16px);
+        }
+
+        .panel:nth-child(1) { animation: fadeSlideLeft 0.5s var(--ease-out-expo) 0.2s forwards; }
+        .panel:nth-child(2) { animation: fadeSlideLeft 0.5s var(--ease-out-expo) 0.35s forwards; }
+        .panel:nth-child(3) { animation: fadeSlideLeft 0.5s var(--ease-out-expo) 0.5s forwards; }
+        .panel:nth-child(4) { animation: fadeSlideLeft 0.5s var(--ease-out-expo) 0.65s forwards; }
+
+        .panel__title {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-muted);
+            margin-bottom: 14px;
+        }
+
+        /* --- Phase list --- */
+        .phase-list {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .phase-item {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 12px;
+            padding: 10px 12px;
+            border-radius: var(--radius-sm);
+            transition: background 0.25s ease;
+            position: relative;
+        }
+
+        .phase-item:hover {
+            background: var(--bg-hover);
+        }
+
+        .phase-item__marker {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            padding-top: 2px;
+        }
+
+        .phase-item__dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            border: 2px solid var(--text-muted);
+            flex-shrink: 0;
+        }
+
+        .phase-item--active .phase-item__dot {
+            border-color: var(--accent-red);
+            background: var(--accent-red);
+            box-shadow: 0 0 6px rgba(239, 83, 80, 0.35);
+        }
+
+        .phase-item__line {
+            width: 1px;
+            flex: 1;
+            background: var(--border-default);
+            min-height: 8px;
+        }
+
+        .phase-item:last-child .phase-item__line { display: none; }
+
+        .phase-item__name {
+            font-family: var(--font-display);
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-bottom: 2px;
+        }
+
+        .phase-item--active .phase-item__name { color: var(--accent-red); }
+
+        .phase-item__date {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .phase-item__desc {
+            font-size: 12px;
+            color: var(--text-secondary);
+            line-height: 1.45;
+            margin-top: 3px;
+        }
+
+        /* --- Zone list --- */
+        .zone-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .zone-item {
+            padding: 12px 14px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-subtle);
+        }
+
+        .zone-item--dist {
+            background: linear-gradient(135deg, rgba(239, 83, 80, 0.06) 0%, transparent 60%);
+            border-color: rgba(239, 83, 80, 0.2);
+        }
+
+        .zone-item--accum {
+            background: linear-gradient(135deg, rgba(38, 166, 154, 0.06) 0%, transparent 60%);
+            border-color: rgba(38, 166, 154, 0.2);
+        }
+
+        .zone-item__label {
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+        }
+
+        .zone-item__range {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .zone-item__price {
+            font-family: var(--font-mono);
+            font-size: 18px;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+        }
+
+        .zone-item--dist .zone-item__price { color: var(--accent-red); }
+        .zone-item--accum .zone-item__price { color: var(--accent-green); }
+
+        .zone-item__separator {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .zone-item__dates {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 6px;
+        }
+
+        /* --- Summary --- */
+        .summary-content {
+            font-size: 13px;
+            line-height: 1.65;
+            color: var(--text-secondary);
+        }
+
+        .summary-content strong {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        .summary-content br { display: block; content: ''; margin-top: 6px; }
+
+        /* --- Loading --- */
+        .loading-overlay {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg-base);
+            z-index: 1000;
+            transition: opacity 0.5s var(--ease-out-expo), visibility 0.5s;
+        }
+
+        .loading-overlay.hidden {
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+        }
+
+        .loading-spinner {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .loading-spinner__bars {
+            display: flex;
+            gap: 4px;
+            height: 24px;
+            align-items: end;
+        }
+
+        .loading-spinner__bar {
+            width: 3px;
+            background: var(--text-muted);
+            border-radius: 2px;
+            animation: barPulse 1.2s ease-in-out infinite;
+        }
+
+        .loading-spinner__bar:nth-child(1) { height: 8px; animation-delay: 0s; }
+        .loading-spinner__bar:nth-child(2) { height: 16px; animation-delay: 0.1s; }
+        .loading-spinner__bar:nth-child(3) { height: 24px; animation-delay: 0.2s; }
+        .loading-spinner__bar:nth-child(4) { height: 16px; animation-delay: 0.3s; }
+        .loading-spinner__bar:nth-child(5) { height: 8px; animation-delay: 0.4s; }
+
+        .loading-spinner__text {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--text-muted);
+            letter-spacing: 0.05em;
+        }
+
+        /* --- Animations --- */
+        @keyframes fadeSlideDown {
+            from { opacity: 0; transform: translateY(-12px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes fadeSlideUp {
+            from { opacity: 0; transform: translateY(12px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes fadeSlideLeft {
+            from { opacity: 0; transform: translateX(16px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        @keyframes barPulse {
+            0%, 100% { transform: scaleY(0.4); opacity: 0.4; }
+            50% { transform: scaleY(1); opacity: 1; }
+        }
+
+        /* --- Responsive --- */
+        @media (max-width: 900px) {
+            .layout {
+                grid-template-columns: 1fr;
+                grid-template-rows: auto 1fr auto;
+                height: 100dvh;
+                overflow-y: auto;
+            }
+
+            .main-area { border-right: none; min-height: 65dvh; }
+
+            .sidebar {
+                border-top: 1px solid var(--border-subtle);
+                overflow-y: visible;
+            }
+
+            .header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 10px;
+            }
+
+            .header-quote { text-align: left; max-width: none; }
+        }
+
+        @media (max-width: 600px) {
+            .header { padding: 16px; }
+            .stock-name { font-size: 20px; }
+            .panel { padding: 16px; }
+        }
+
+        /* --- Error state --- */
+        .error-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            padding: 40px;
+            text-align: center;
+        }
+
+        .error-state__icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: var(--accent-red-dim);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            color: var(--accent-red);
+        }
+
+        .error-state__msg {
+            font-family: var(--font-mono);
+            font-size: 13px;
+            color: var(--text-secondary);
+            max-width: 400px;
+            line-height: 1.5;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div id="main"></div>
+    <div class="grain"></div>
+
+    <div class="loading-overlay" id="loading">
+        <div class="loading-spinner">
+            <div class="loading-spinner__bars">
+                <div class="loading-spinner__bar"></div>
+                <div class="loading-spinner__bar"></div>
+                <div class="loading-spinner__bar"></div>
+                <div class="loading-spinner__bar"></div>
+                <div class="loading-spinner__bar"></div>
+            </div>
+            <span class="loading-spinner__text">Rendering Wyckoff structure...</span>
+        </div>
     </div>
-    <div id="loading" class="loading">正在绘制大师级威科夫图表...</div>
+
+    <div class="layout" id="app" style="visibility: hidden;">
+        <header class="header" id="header"></header>
+
+        <div class="main-area">
+            <div class="chart-wrapper" id="chartWrapper">
+                <div id="main"></div>
+            </div>
+        </div>
+
+        <aside class="sidebar" id="sidebar"></aside>
+    </div>
 
     <script>
-        // --- 1. MA 计算函数 ---
+        // --- Utilities ---
         function calculateMA(data, dayCount) {
-            var result = [];
-            for (var i = 0, len = data.length; i < len; i++) {
-                if (i < dayCount) {
-                    result.push('-');
-                    continue;
-                }
-                var sum = 0;
-                for (var j = 0; j < dayCount; j++) {
-                    // data[i][1] is close price
-                    sum += parseFloat(data[i - j][1]);
-                }
+            const result = [];
+            for (let i = 0, len = data.length; i < len; i++) {
+                if (i < dayCount) { result.push('-'); continue; }
+                let sum = 0;
+                for (let j = 0; j < dayCount; j++) { sum += parseFloat(data[i - j][1]); }
                 result.push((sum / dayCount).toFixed(2));
             }
             return result;
         }
 
-        // --- 2. 文本换行工具 ---
         function wrapText(text, maxLength) {
             if (!text) return '';
             const result = [];
@@ -72,41 +614,154 @@
             return result.join('\n');
         }
 
-        // --- 3. 主逻辑 ---
+        function isBullishEvent(type) {
+            return ['SC', 'Spring', 'LPS', 'SOS', 'JAC', 'BU'].includes(type);
+        }
+
+        function isDistributionPhase(analysis) {
+            const types = analysis.zones.map(z => z.type);
+            return types.includes('distribution');
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return '';
+            const parts = dateStr.split('-');
+            return parts.length === 3 ? `${parts[1]}.${parts[2]}` : dateStr;
+        }
+
+        // --- Render UI panels ---
+        function renderHeader(analysis) {
+            const lastPhase = analysis.phases[analysis.phases.length - 1];
+            const isDist = isDistributionPhase(analysis);
+            const badgeClass = isDist ? 'phase-badge--bear' : 'phase-badge--bull';
+
+            document.getElementById('header').innerHTML = `
+                <div class="header-left">
+                    <span class="stock-name">${analysis.stock.name}</span>
+                    <span class="stock-code">${analysis.stock.code}</span>
+                    <span class="phase-badge ${badgeClass}">
+                        <span class="phase-badge__dot"></span>
+                        ${lastPhase.name}
+                    </span>
+                </div>
+                <div class="header-quote">${analysis.quote || ''}</div>
+            `;
+        }
+
+        function buildEventListHTML(analysis) {
+            const events = [...analysis.events].sort((a, b) => new Date(a.date) - new Date(b.date));
+            return events.map(evt => {
+                const bull = isBullishEvent(evt.type);
+                const cls = bull ? 'event-row--bull' : 'event-row--bear';
+                let cleanLabel = evt.label;
+                if (cleanLabel.startsWith(evt.type)) {
+                    cleanLabel = cleanLabel.substring(evt.type.length).replace(/^[::\s]+/, '');
+                }
+                return `
+                    <div class="event-row ${cls}">
+                        <span class="event-row__type">${evt.type}</span>
+                        <span class="event-row__price">${evt.price.toFixed(2)}</span>
+                        <span class="event-row__label">${cleanLabel}</span>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderSidebar(analysis) {
+            const lastPhaseIdx = analysis.phases.length - 1;
+
+            // Phases
+            const phaseItems = analysis.phases.map((phase, idx) => {
+                const isActive = idx === lastPhaseIdx && !phase.end;
+                const activeClass = isActive ? 'phase-item--active' : '';
+                const dateRange = phase.end
+                    ? `${formatDate(phase.start)} ~ ${formatDate(phase.end)}`
+                    : `${formatDate(phase.start)} ~ now`;
+
+                return `
+                    <div class="phase-item ${activeClass}">
+                        <div class="phase-item__marker">
+                            <div class="phase-item__dot"></div>
+                            <div class="phase-item__line"></div>
+                        </div>
+                        <div>
+                            <div class="phase-item__name">${phase.name}</div>
+                            <div class="phase-item__date">${dateRange}</div>
+                            ${phase.description ? `<div class="phase-item__desc">${phase.description}</div>` : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            // Zones
+            const zoneItems = analysis.zones.map(zone => {
+                const isDist = zone.type === 'distribution';
+                const cls = isDist ? 'zone-item--dist' : 'zone-item--accum';
+                return `
+                    <div class="zone-item ${cls}">
+                        <div class="zone-item__label">${zone.label}</div>
+                        <div class="zone-item__range">
+                            <span class="zone-item__price">${zone.top.toFixed(1)}</span>
+                            <span class="zone-item__separator">&#8212;</span>
+                            <span class="zone-item__price">${zone.bottom.toFixed(1)}</span>
+                        </div>
+                        <div class="zone-item__dates">${formatDate(zone.start)} ~ ${formatDate(zone.end)}</div>
+                    </div>
+                `;
+            }).join('');
+
+            // Summary
+            const summaryHtml = analysis.summary || '';
+
+            const eventListHtml = buildEventListHTML(analysis);
+
+            document.getElementById('sidebar').innerHTML = `
+                <div class="panel">
+                    <div class="panel__title">Phases</div>
+                    <div class="phase-list">${phaseItems}</div>
+                </div>
+                <div class="panel">
+                    <div class="panel__title">Trading Ranges</div>
+                    <div class="zone-list">${zoneItems}</div>
+                </div>
+                <div class="panel">
+                    <div class="panel__title">Key Events</div>
+                    <div class="event-list">${eventListHtml}</div>
+                </div>
+                <div class="panel">
+                    <div class="panel__title">Analysis</div>
+                    <div class="summary-content">${summaryHtml}</div>
+                </div>
+            `;
+        }
+
+        // --- Main chart logic ---
         async function initChart() {
             try {
-                // 加载数据
                 const [klineRes, analysisRes] = await Promise.all([
                     fetch('kline.csv').then(r => r.text()),
                     fetch('analysis.json').then(r => r.json())
                 ]);
 
-                // 解析 CSV
                 const parsedData = Papa.parse(klineRes, { header: true, skipEmptyLines: true });
-                // 排序
                 parsedData.data.sort((a, b) => new Date(a.date) - new Date(b.date));
 
                 const rawData = parsedData.data;
                 const dates = rawData.map(d => d.date);
-                const kValues = rawData.map(d => [
-                    parseFloat(d.open),
-                    parseFloat(d.close),
-                    parseFloat(d.low),
-                    parseFloat(d.high)
-                ]);
-                // 收盘价数组用于 MA
                 const closePrices = rawData.map(d => [d.date, parseFloat(d.close)]);
+                const analysis = analysisRes;
 
-                // 计算 MA
+                // Compute MA
                 const ma50 = calculateMA(closePrices, 50);
                 const ma200 = calculateMA(closePrices, 200);
 
-                const analysis = analysisRes;
+                // Render UI panels
+                renderHeader(analysis);
+                renderSidebar(analysis);
 
-                // --- 4. 构建 ECharts 数据 ---
+                // --- Build ECharts data ---
 
-                // A. 区域 (Zones) - 吸筹/派发
-                // 逻辑: 吸筹(淡绿), 派发(淡红)
+                // Zones
                 const zoneMarkAreas = analysis.zones.map(zone => {
                     const isAccum = zone.type === 'accumulation';
                     return [
@@ -114,92 +769,91 @@
                             xAxis: zone.start,
                             yAxis: zone.top,
                             itemStyle: {
-                                color: isAccum ? 'rgba(0, 255, 0, 0.08)' : 'rgba(255, 0, 0, 0.08)'
+                                color: isAccum
+                                    ? 'rgba(38, 166, 154, 0.1)'
+                                    : 'rgba(239, 83, 80, 0.1)'
                             },
                             label: {
                                 show: true,
                                 position: 'insideTopLeft',
                                 formatter: zone.label,
-                                color: isAccum ? '#2e7d32' : '#c62828',
-                                fontSize: 14,
-                                fontWeight: 'bold'
+                                color: isAccum ? '#26a69a' : '#ef5350',
+                                fontSize: 11,
+                                fontWeight: 'bold',
+                                fontFamily: 'Outfit, sans-serif'
                             }
                         },
-                        {
-                            xAxis: zone.end,
-                            yAxis: zone.bottom
-                        }
+                        { xAxis: zone.end, yAxis: zone.bottom }
                     ];
                 });
 
-                // B. 阶段 (Phases) - 竖虚线（标签通过 graphic 组件在上方固定区域渲染）
+                // Zone boundary lines (horizontal dashed lines at top and bottom of each zone)
+                const zoneBoundaryLines = [];
+                analysis.zones.forEach(zone => {
+                    const isAccum = zone.type === 'accumulation';
+                    const lineColor = isAccum ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)';
+                    // Top boundary
+                    zoneBoundaryLines.push({
+                        yAxis: zone.top,
+                        label: {
+                            show: true,
+                            position: 'insideEndTop',
+                            formatter: `${zone.top.toFixed(1)}`,
+                            color: isAccum ? '#26a69a' : '#ef5350',
+                            fontSize: 10,
+                            fontFamily: 'JetBrains Mono, monospace'
+                        },
+                        lineStyle: { type: 'dashed', color: lineColor, width: 1 }
+                    });
+                    // Bottom boundary
+                    zoneBoundaryLines.push({
+                        yAxis: zone.bottom,
+                        label: {
+                            show: true,
+                            position: 'insideEndBottom',
+                            formatter: `${zone.bottom.toFixed(1)}`,
+                            color: isAccum ? '#26a69a' : '#ef5350',
+                            fontSize: 10,
+                            fontFamily: 'JetBrains Mono, monospace'
+                        },
+                        lineStyle: { type: 'dashed', color: lineColor, width: 1 }
+                    });
+                });
+
+                // Phase vertical lines
                 const phaseMarkLines = analysis.phases.map(phase => ({
                     xAxis: phase.start,
                     label: { show: false },
-                    lineStyle: {
-                        type: 'dashed',
-                        color: '#666',
-                        width: 1.5
-                    }
+                    lineStyle: { type: 'dashed', color: '#d1d4dc', width: 1 }
                 }));
 
-                // Phase 区域（仅用于背景，不显示标签）
-                const phaseMarkAreas = analysis.phases.map((phase, idx) => {
-                    const nextStart = analysis.phases[idx + 1] ? analysis.phases[idx + 1].start : dates[dates.length - 1];
-                    return [
-                        {
-                            xAxis: phase.start,
-                            itemStyle: { color: 'transparent' }
-                        },
-                        {
-                            xAxis: nextStart
-                        }
-                    ];
-                });
-                
-                // Phase 标签数据（用于 graphic 组件，在图表渲染后计算像素位置）
+                // Phase label data
                 const phaseLabelsData = analysis.phases.map((phase, idx) => {
                     const startIdx = dates.indexOf(phase.start);
                     const nextStart = analysis.phases[idx + 1] ? analysis.phases[idx + 1].start : dates[dates.length - 1];
                     const endIdx = dates.indexOf(nextStart);
-                    const midIdx = Math.floor((startIdx + endIdx) / 2); // 区间中点
-                    return {
-                        name: phase.name,
-                        dateIdx: midIdx,
-                        date: dates[midIdx] || phase.start
-                    };
+                    const midIdx = Math.floor((startIdx + endIdx) / 2);
+                    return { name: phase.name, dateIdx: midIdx, date: dates[midIdx] || phase.start };
                 });
 
-
-                // C. 关键事件 (Events) - 智能标注（防重叠算法）
-                // 按日期排序事件，计算智能布局
-                const sortedEvents = [...analysis.events].sort((a, b) => 
-                    new Date(a.date) - new Date(b.date)
-                );
-                
-                // 计算价格范围，用于判断标注应该显示在上方还是下方
+                // Events - smart positioning
+                const sortedEvents = [...analysis.events].sort((a, b) => new Date(a.date) - new Date(b.date));
                 const allPrices = rawData.map(d => parseFloat(d.close));
                 const priceMin = Math.min(...allPrices);
                 const priceMax = Math.max(...allPrices);
                 const priceMid = (priceMin + priceMax) / 2;
-                
-                // 计算事件间的日期距离，智能分配高度层级
-                // 分别维护上方和下方的层级
+
                 const eventPositions = [];
-                const topSlots = [];    // 上方标注的层级占用
-                const bottomSlots = []; // 下方标注的层级占用
-                
-                sortedEvents.forEach((evt, i) => {
+                const topSlots = [];
+                const bottomSlots = [];
+
+                sortedEvents.forEach((evt) => {
                     const evtDateIdx = dates.indexOf(evt.date);
-                    // 根据价格位置决定标注方向：高价显示在下方，低价显示在上方
                     const showBelow = evt.price > priceMid;
                     const slots = showBelow ? bottomSlots : topSlots;
-                    
                     let assignedLevel = 0;
-                    // 找到一个不冲突的层级
                     for (let level = 0; level < 4; level++) {
                         const lastUsedIdx = slots[level] || -100;
-                        // 如果距离上次使用超过12个交易日，可以复用这个层级
                         if (evtDateIdx - lastUsedIdx > 12) {
                             assignedLevel = level;
                             slots[level] = evtDateIdx;
@@ -211,136 +865,198 @@
                 });
 
                 const eventMarkPoints = sortedEvents.map((evt, i) => {
-                    const isBullish = ['SC', 'Spring', 'LPS', 'SOS', 'JAC'].includes(evt.type);
-                    const color = isBullish ? '#D90429' : '#2b2d42';
-                    
+                    const bull = isBullishEvent(evt.type);
+                    const color = bull ? '#ef5350' : '#787b86';
                     const { level, showBelow } = eventPositions[i];
-                    const distance = 25 + (level * 50);
+                    const distance = 8 + (level * 22);
 
-                    // 移除 label 中的 "[Type]: " 前缀
                     let cleanLabel = evt.label;
                     if (cleanLabel.startsWith(evt.type)) {
-                        cleanLabel = cleanLabel.substring(evt.type.length).replace(/^[:：\s]+/, '');
+                        cleanLabel = cleanLabel.substring(evt.type.length).replace(/^[::\s]+/, '');
                     }
-                    const wrappedReason = wrapText(cleanLabel, 10);
 
                     return {
                         name: evt.type,
                         coord: [evt.date, evt.price],
                         value: evt.type,
-                        symbol: 'pin',
-                        symbolSize: 25,
-                        symbolRotate: showBelow ? 180 : 0,
-                        symbolOffset: [0, showBelow ? 12 : -12],
-                        itemStyle: { color: color },
+                        symbol: 'circle',
+                        symbolSize: 8,
+                        symbolOffset: [0, 0],
+                        itemStyle: {
+                            color: color,
+                            borderColor: '#ffffff',
+                            borderWidth: 1.5
+                        },
                         label: {
                             show: true,
                             position: showBelow ? 'bottom' : 'top',
                             distance: distance,
-                            formatter: `{term|${evt.type}}\n{reason|${wrappedReason}}`,
-                            backgroundColor: 'rgba(255,255,255,0.95)',
-                            borderColor: color,
-                            borderWidth: 1,
-                            borderRadius: 4,
-                            padding: [5, 8],
-                            align: 'center',
-                            rich: {
-                                term: {
-                                    fontSize: 13,
-                                    fontWeight: 'bold',
-                                    color: color,
-                                    align: 'center',
-                                    padding: [0, 0, 2, 0]
-                                },
-                                reason: {
-                                    fontSize: 10,
-                                    color: '#555',
-                                    align: 'center',
-                                    lineHeight: 13
-                                }
-                            }
-                        }
+                            formatter: evt.type,
+                            fontSize: 10,
+                            fontWeight: 'bold',
+                            fontFamily: 'JetBrains Mono, monospace',
+                            color: color,
+                            backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                            borderRadius: 3,
+                            padding: [3, 5]
+                        },
+                        // Store tooltip data for hover
+                        _tooltipLabel: cleanLabel,
+                        _tooltipPrice: evt.price,
+                        _tooltipDate: evt.date
                     };
                 });
 
-                // --- 5. ECharts Option ---
+                // --- ECharts Option (dark theme) ---
                 const option = {
-                    // 标题: 左上角
+                    backgroundColor: 'transparent',
                     title: {
-                        text: `${analysis.stock.name} (${analysis.stock.code}) 威科夫结构图谱`,
-                        subtext: analysis.quote || "Wyckoff Market Structure",
-                        left: '3%',
-                        top: '0.5%',
-                        textStyle: { fontSize: 20, fontWeight: 'bold' },
-                        subtextStyle: { fontSize: 12, fontStyle: 'italic', color: '#666' }
+                        show: false
                     },
                     tooltip: {
                         trigger: 'axis',
-                        axisPointer: { type: 'cross' },
+                        axisPointer: {
+                            type: 'cross',
+                            lineStyle: { color: '#9598a1', width: 1, type: 'dashed' },
+                            crossStyle: { color: '#9598a1', width: 1, type: 'dashed' },
+                            label: {
+                                backgroundColor: '#131722',
+                                color: '#ffffff',
+                                fontFamily: 'JetBrains Mono, monospace',
+                                fontSize: 10
+                            }
+                        },
+                        backgroundColor: '#ffffff',
+                        borderColor: '#e0e3eb',
                         borderWidth: 1,
-                        borderColor: '#ccc',
-                        padding: 10,
-                        textStyle: { color: '#000' }
+                        padding: [10, 14],
+                        textStyle: {
+                            color: '#131722',
+                            fontFamily: 'JetBrains Mono, monospace',
+                            fontSize: 12
+                        },
+                        formatter: function(params) {
+                            if (!params || !params.length) return '';
+                            const date = params[0].axisValue;
+                            let result = '<span style="color:#787b86;font-size:11px">' + date + '</span>';
+                            params.forEach(p => {
+                                if (p.seriesType === 'candlestick' && p.value) {
+                                    const o = parseFloat(p.value[1]).toFixed(2);
+                                    const c = parseFloat(p.value[2]).toFixed(2);
+                                    const l = parseFloat(p.value[3]).toFixed(2);
+                                    const h = parseFloat(p.value[4]).toFixed(2);
+                                    const chg = ((p.value[2] - p.value[1]) / p.value[1] * 100).toFixed(2);
+                                    const chgColor = p.value[2] >= p.value[1] ? '#ef5350' : '#26a69a';
+                                    result += '<br/><span style="color:#787b86">O</span> <span style="font-weight:500">' + o + '</span>'
+                                        + '  <span style="color:#787b86">H</span> <span style="font-weight:500">' + h + '</span>'
+                                        + '  <span style="color:#787b86">L</span> <span style="font-weight:500">' + l + '</span>'
+                                        + '  <span style="color:#787b86">C</span> <span style="font-weight:500">' + c + '</span>'
+                                        + '  <span style="color:' + chgColor + ';font-weight:600">' + (chg > 0 ? '+' : '') + chg + '%</span>';
+                                } else if (p.seriesType === 'line' && p.value !== '-') {
+                                    const dot = '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:' + p.color + ';margin-right:6px"></span>';
+                                    result += '<br/>' + dot + p.seriesName + '  <span style="font-weight:500">' + parseFloat(p.value).toFixed(2) + '</span>';
+                                }
+                            });
+                            return result;
+                        }
                     },
                     legend: {
-                        data: ['收盘价', 'MA50', 'MA200'],
-                        top: '1%',
-                        right: '3%',
-                        orient: 'vertical',
-                        backgroundColor: 'rgba(255,255,255,0.8)',
-                        borderRadius: 4,
-                        padding: 6,
-                        textStyle: { fontSize: 11 }
+                        data: ['K', 'MA50', 'MA200'],
+                        top: 8,
+                        right: 16,
+                        orient: 'horizontal',
+                        itemGap: 20,
+                        textStyle: {
+                            color: '#787b86',
+                            fontFamily: 'JetBrains Mono, monospace',
+                            fontSize: 11
+                        },
+                        itemWidth: 16,
+                        itemHeight: 2
                     },
                     grid: {
-                        left: '5%',
-                        right: '8%',
-                        bottom: '12%',
-                        top: '15%',   // 图表区域顶部（Phase标签在 8%-14% 区域）
-                        containLabel: true
+                        left: 60,
+                        right: 50,
+                        bottom: 30,
+                        top: 44,
+                        containLabel: false
                     },
                     xAxis: {
                         type: 'category',
                         data: dates,
-                        scale: true,
-                        boundaryGap: false,
-                        axisLine: { onZero: false, lineStyle: { color: '#666' } },
-                        splitLine: { show: false },
-                        min: 'dataMin'
+                        boundaryGap: true,
+                        axisLine: { lineStyle: { color: '#e0e3eb' } },
+                        axisTick: { show: false },
+                        axisLabel: {
+                            color: '#787b86',
+                            fontFamily: 'JetBrains Mono, monospace',
+                            fontSize: 10,
+                            margin: 12
+                        },
+                        splitLine: { show: false }
                     },
                     yAxis: {
                         scale: true,
-                        splitLine: { lineStyle: { color: '#eee' } }
+                        axisLine: { show: false },
+                        axisTick: { show: false },
+                        axisLabel: {
+                            color: '#787b86',
+                            fontFamily: 'JetBrains Mono, monospace',
+                            fontSize: 10,
+                            margin: 12
+                        },
+                        splitLine: {
+                            lineStyle: { color: '#f0f3fa' }
+                        }
                     },
                     dataZoom: [
-                        { type: 'inside', start: 50, end: 100 },
-                        { 
-                            type: 'slider', 
-                            show: true, 
-                            bottom: '3%',
-                            height: 25,
-                            borderColor: '#ddd',
-                            fillerColor: 'rgba(47, 69, 84, 0.15)',
-                            handleStyle: { color: '#2f4554' }
+                        {
+                            type: 'inside',
+                            start: 50,
+                            end: 100,
+                            zoomOnMouseWheel: true,
+                            moveOnMouseWheel: false,
+                            moveOnMouseMove: false,
+                            preventDefaultMouseMove: false
                         }
                     ],
                     series: [
                         {
-                            name: '收盘价',
-                            type: 'line', // 用线图表示收盘价，符合用户"收盘价线（黑色）"的要求
-                            data: rawData.map(d => d.close),
-                            symbol: 'none',
-                            lineStyle: { color: '#000000', width: 1.5 },
+                            name: 'K',
+                            type: 'candlestick',
+                            data: rawData.map(d => [
+                                parseFloat(d.open),
+                                parseFloat(d.close),
+                                parseFloat(d.low),
+                                parseFloat(d.high)
+                            ]),
+                            itemStyle: {
+                                color: '#ef5350',
+                                color0: '#26a69a',
+                                borderColor: '#ef5350',
+                                borderColor0: '#26a69a'
+                            },
                             markLine: {
                                 symbol: ['none', 'none'],
-                                data: phaseMarkLines,
+                                data: [...phaseMarkLines, ...zoneBoundaryLines],
                                 animation: false
                             },
                             markArea: {
-                                data: [...zoneMarkAreas, ...phaseMarkAreas]
+                                data: [...zoneMarkAreas]
                             },
                             markPoint: {
-                                data: eventMarkPoints
+                                data: eventMarkPoints,
+                                tooltip: {
+                                    show: true,
+                                    formatter: function(params) {
+                                        const d = params.data;
+                                        const color = d.itemStyle?.color || '#d1d4dc';
+                                        return '<span style="color:' + color + ';font-weight:600;font-size:13px">' + d.name + '</span>'
+                                            + '  <span style="color:#787b86;font-size:11px">' + (d._tooltipDate || '') + '</span>'
+                                            + '<br/><span style="color:#131722;font-size:14px;font-weight:600">' + (d._tooltipPrice?.toFixed(2) || '') + '</span>'
+                                            + '<br/><span style="color:#787b86;font-size:11px;line-height:1.5">' + (d._tooltipLabel || '') + '</span>';
+                                    }
+                                }
                             }
                         },
                         {
@@ -349,7 +1065,7 @@
                             data: ma50,
                             smooth: true,
                             symbol: 'none',
-                            lineStyle: { color: '#2196f3', width: 1.5, type: 'dashed' } // 蓝虚线
+                            lineStyle: { color: '#ff9800', width: 1, type: 'dashed', opacity: 0.7 }
                         },
                         {
                             name: 'MA200',
@@ -357,72 +1073,123 @@
                             data: ma200,
                             smooth: true,
                             symbol: 'none',
-                            lineStyle: { color: '#f44336', width: 1.5, type: 'dashed' } // 红虚线
+                            lineStyle: { color: '#e91e63', width: 1, type: 'dashed', opacity: 0.7 }
                         }
                     ]
                 };
 
-                const chart = echarts.init(document.getElementById('main'));
+                // Init chart
+                const chartDom = document.getElementById('main');
+                const chart = echarts.init(chartDom);
                 chart.setOption(option);
-                
-                // --- 6. 渲染 Phase 标签（在图表上方固定区域，竖排显示）---
+
+                // Phase labels (rendered as graphic elements)
                 function renderPhaseLabels() {
-                    // 获取 grid 区域边界
                     const gridRect = chart.getModel().getComponent('grid').coordinateSystem.getRect();
                     const gridLeft = gridRect.x;
                     const gridRight = gridRect.x + gridRect.width;
-                    
-                    const graphicElements = phaseLabelsData.map((item, idx) => {
-                        // 将日期转换为像素坐标
+
+                    const graphicElements = phaseLabelsData.map((item) => {
                         const xPixel = chart.convertToPixel({ xAxisIndex: 0 }, item.date);
-                        
-                        // 检查是否在可视范围内
                         const isVisible = xPixel >= gridLeft - 20 && xPixel <= gridRight + 20;
-                        
-                        // 提取简短名称用于显示
+
                         let shortName = item.name;
                         if (item.name.length > 15) {
                             const match = item.name.match(/Phase\s*([A-E])/i);
                             shortName = match ? `Phase ${match[1]}` : item.name.substring(0, 12);
                         }
-                        
+
                         return {
                             type: 'text',
                             left: xPixel,
-                            top: '7%',  // 固定在标题下方、图表上方的区域
+                            top: 36,
                             invisible: !isVisible,
                             style: {
                                 text: shortName,
-                                fill: '#C41E3A',
-                                fontSize: 11,
-                                fontWeight: 'bold',
-                                fontFamily: 'Arial, sans-serif',
+                                fill: '#b2b5be',
+                                fontSize: 10,
+                                fontWeight: '500',
+                                fontFamily: 'JetBrains Mono, monospace',
                                 textAlign: 'center',
                                 textVerticalAlign: 'middle',
-                                // 竖排显示（逆时针旋转90度）
                                 textRotation: -Math.PI / 2
                             },
                             z: 100
                         };
                     });
-                    
+
                     chart.setOption({ graphic: graphicElements });
                 }
-                
-                // 初次渲染和 dataZoom 变化时更新标签位置
+
                 renderPhaseLabels();
                 chart.on('dataZoom', renderPhaseLabels);
-                
-                document.getElementById('loading').style.display = 'none';
-                
-                // 窗口大小变化时重新渲染
+
+                // --- TradingView-style drag-to-pan ---
+                const chartWrapper = document.getElementById('chartWrapper');
+                let isDragging = false;
+                let dragStartX = 0;
+                let dragStartZoom = { start: 0, end: 0 };
+
+                chartDom.addEventListener('mousedown', (e) => {
+                    if (e.button !== 0) return;
+                    isDragging = true;
+                    dragStartX = e.clientX;
+                    const opt = chart.getOption();
+                    dragStartZoom = {
+                        start: opt.dataZoom[0].start,
+                        end: opt.dataZoom[0].end
+                    };
+                    chartWrapper.classList.add('is-dragging');
+                    e.preventDefault();
+                });
+
+                document.addEventListener('mousemove', (e) => {
+                    if (!isDragging) return;
+                    const dx = e.clientX - dragStartX;
+                    const range = dragStartZoom.end - dragStartZoom.start;
+                    const chartWidth = chartDom.clientWidth;
+                    const shift = -(dx / chartWidth) * range * 1.5;
+
+                    let newStart = dragStartZoom.start + shift;
+                    let newEnd = dragStartZoom.end + shift;
+
+                    if (newStart < 0) { newEnd -= newStart; newStart = 0; }
+                    if (newEnd > 100) { newStart -= (newEnd - 100); newEnd = 100; }
+                    newStart = Math.max(0, newStart);
+                    newEnd = Math.min(100, newEnd);
+
+                    chart.dispatchAction({
+                        type: 'dataZoom',
+                        start: newStart,
+                        end: newEnd
+                    });
+                });
+
+                document.addEventListener('mouseup', () => {
+                    if (!isDragging) return;
+                    isDragging = false;
+                    chartWrapper.classList.remove('is-dragging');
+                });
+
+                // Show content, hide loading
+                document.getElementById('app').style.visibility = 'visible';
+                document.getElementById('loading').classList.add('hidden');
+
+                // Resize handler
                 window.addEventListener('resize', () => {
                     chart.resize();
                     setTimeout(renderPhaseLabels, 100);
                 });
 
             } catch (e) {
-                document.getElementById('loading').innerHTML = '绘图失败: ' + e.message;
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('app').style.visibility = 'visible';
+                document.getElementById('app').innerHTML = `
+                    <div class="error-state" style="grid-column: 1 / -1; min-height: 100dvh;">
+                        <div class="error-state__icon">!</div>
+                        <div class="error-state__msg">${e.message}</div>
+                    </div>
+                `;
                 console.error(e);
             }
         }
