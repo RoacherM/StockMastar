@@ -1125,26 +1125,68 @@
                 renderPhaseLabels();
                 chart.on('dataZoom', renderPhaseLabels);
 
-                // --- TradingView-style drag-to-pan ---
+                // --- Interaction: drag-to-pan + Shift+drag rectangle zoom ---
                 const chartWrapper = document.getElementById('chartWrapper');
                 let isDragging = false;
+                let isSelecting = false;
                 let dragStartX = 0;
+                let dragStartY = 0;
                 let dragStartZoom = { start: 0, end: 0 };
+
+                // Selection rectangle overlay
+                const selectRect = document.createElement('div');
+                selectRect.style.cssText = 'position:absolute;border:1.5px solid rgba(41,98,255,0.6);background:rgba(41,98,255,0.08);pointer-events:none;display:none;z-index:1000;border-radius:2px;';
+                chartDom.style.position = 'relative';
+                chartDom.appendChild(selectRect);
+
+                // Cursor hint for Shift key
+                document.addEventListener('keydown', (e) => {
+                    if (e.key === 'Shift') chartDom.style.cursor = 'crosshair';
+                });
+                document.addEventListener('keyup', (e) => {
+                    if (e.key === 'Shift' && !isSelecting) chartDom.style.cursor = '';
+                });
 
                 chartDom.addEventListener('mousedown', (e) => {
                     if (e.button !== 0) return;
-                    isDragging = true;
-                    dragStartX = e.clientX;
-                    const opt = chart.getOption();
-                    dragStartZoom = {
-                        start: opt.dataZoom[0].start,
-                        end: opt.dataZoom[0].end
-                    };
-                    chartWrapper.classList.add('is-dragging');
                     e.preventDefault();
+
+                    if (e.shiftKey) {
+                        // --- Shift+drag: rectangle zoom ---
+                        isSelecting = true;
+                        const rect = chartDom.getBoundingClientRect();
+                        dragStartX = e.clientX - rect.left;
+                        dragStartY = e.clientY - rect.top;
+                        selectRect.style.left = dragStartX + 'px';
+                        selectRect.style.top = dragStartY + 'px';
+                        selectRect.style.width = '0px';
+                        selectRect.style.height = '0px';
+                        selectRect.style.display = 'block';
+                        chartDom.style.cursor = 'crosshair';
+                    } else {
+                        // --- Normal drag: pan ---
+                        isDragging = true;
+                        dragStartX = e.clientX;
+                        const opt = chart.getOption();
+                        dragStartZoom = {
+                            start: opt.dataZoom[0].start,
+                            end: opt.dataZoom[0].end
+                        };
+                        chartWrapper.classList.add('is-dragging');
+                    }
                 });
 
                 document.addEventListener('mousemove', (e) => {
+                    if (isSelecting) {
+                        const rect = chartDom.getBoundingClientRect();
+                        const curX = e.clientX - rect.left;
+                        const curY = e.clientY - rect.top;
+                        selectRect.style.left = Math.min(dragStartX, curX) + 'px';
+                        selectRect.style.top = Math.min(dragStartY, curY) + 'px';
+                        selectRect.style.width = Math.abs(curX - dragStartX) + 'px';
+                        selectRect.style.height = Math.abs(curY - dragStartY) + 'px';
+                        return;
+                    }
                     if (!isDragging) return;
                     const dx = e.clientX - dragStartX;
                     const range = dragStartZoom.end - dragStartZoom.start;
@@ -1166,10 +1208,50 @@
                     });
                 });
 
-                document.addEventListener('mouseup', () => {
+                document.addEventListener('mouseup', (e) => {
+                    if (isSelecting) {
+                        isSelecting = false;
+                        selectRect.style.display = 'none';
+                        chartDom.style.cursor = '';
+
+                        // Calculate zoom range from selection rectangle
+                        const rect = chartDom.getBoundingClientRect();
+                        const curX = e.clientX - rect.left;
+                        const x1 = Math.min(dragStartX, curX);
+                        const x2 = Math.max(dragStartX, curX);
+
+                        // Ignore tiny drags (< 10px)
+                        if (x2 - x1 < 10) return;
+
+                        // Convert pixel positions to data indices
+                        const startDate = chart.convertFromPixel({ xAxisIndex: 0 }, x1);
+                        const endDate = chart.convertFromPixel({ xAxisIndex: 0 }, x2);
+
+                        if (startDate == null || endDate == null) return;
+
+                        const totalLen = dates.length;
+                        const zoomStart = Math.max(0, (startDate / totalLen) * 100);
+                        const zoomEnd = Math.min(100, ((endDate + 1) / totalLen) * 100);
+
+                        chart.dispatchAction({
+                            type: 'dataZoom',
+                            start: zoomStart,
+                            end: zoomEnd
+                        });
+                        return;
+                    }
                     if (!isDragging) return;
                     isDragging = false;
                     chartWrapper.classList.remove('is-dragging');
+                });
+
+                // Double-click to reset zoom
+                chartDom.addEventListener('dblclick', () => {
+                    chart.dispatchAction({
+                        type: 'dataZoom',
+                        start: 0,
+                        end: 100
+                    });
                 });
 
                 // Show content, hide loading
